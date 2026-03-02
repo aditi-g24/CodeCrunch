@@ -1,103 +1,146 @@
 """
-Configuration file for Offroad Semantic Segmentation Hackathon
-Optimized for maximum IoU and generalization to unseen desert environments
+Configuration file for Offroad Semantic Segmentation
+Competition-grade settings optimized for generalization
 """
 
 import torch
-from pathlib import Path
+import os
 
 class Config:
-    # Paths
-    DATA_ROOT = Path("./data")  # Adjust to your data location
-    TRAIN_IMAGE_DIR = DATA_ROOT / "Train" / "images"
-    TRAIN_MASK_DIR = DATA_ROOT / "Train" / "masks"
-    VAL_IMAGE_DIR = DATA_ROOT / "Val" / "images"
-    VAL_MASK_DIR = DATA_ROOT / "Val" / "masks"
-    TEST_IMAGE_DIR = DATA_ROOT / "testImages"
+    # ==================== PATHS ====================
+    # Adjust these paths for Google Colab
+    TRAIN_IMG_DIR = '/content/Train/images'
+    TRAIN_MASK_DIR = '/content/Train/masks'
+    VAL_IMG_DIR = '/content/Val/images'
+    VAL_MASK_DIR = '/content/Val/masks'
+    TEST_IMG_DIR = '/content/testImages'
     
     # Output directories
-    OUTPUT_DIR = Path("./runs")
-    CHECKPOINT_DIR = OUTPUT_DIR / "checkpoints"
-    LOG_DIR = OUTPUT_DIR / "logs"
-    PREDICTIONS_DIR = OUTPUT_DIR / "predictions"
+    CHECKPOINT_DIR = '/content/checkpoints'
+    RUNS_DIR = '/content/runs'
+    PREDICTIONS_DIR = '/content/predictions'
     
-    # Model architecture
-    # Using SegFormer for better generalization and handling domain shift
-    # SegFormer has shown superior performance on diverse datasets with less overfitting
-    MODEL_NAME = "segformer"  # Options: "segformer", "deeplabv3plus"
-    ENCODER_NAME = "mit_b3"  # For SegFormer: mit_b0 to mit_b5
-    # For DeepLabV3+: "resnet50", "resnet101"
-    ENCODER_WEIGHTS = "imagenet"
+    # ==================== MODEL ====================
+    # Architecture choice: SegFormer is preferred for better generalization
+    # and global context modeling, crucial for domain shift scenarios
+    MODEL_NAME = 'segformer'  # Options: 'segformer', 'deeplabv3plus'
     
-    # Dataset
-    NUM_CLASSES = 11  # Adjust based on your actual number of classes
+    # SegFormer settings
+    SEGFORMER_ENCODER = 'mit_b3'  # Options: mit_b0 to mit_b5 (b3 is good balance)
+    
+    # DeepLabV3+ settings (if using deeplabv3plus)
+    DEEPLABV3_BACKBONE = 'resnet101'  # Options: resnet50, resnet101
+    
+    # ==================== CLASSES ====================
+    NUM_CLASSES = 11  # Background + 10 semantic classes
     CLASS_NAMES = [
-        "Trees", "Lush Bushes", "Dry Grass", "Dry Bushes", 
-        "Ground Clutter", "Flowers", "Logs", "Rocks", 
-        "Landscape", "Sky", "Background"
+        'Background',
+        'Trees',
+        'Lush_Bushes',
+        'Dry_Grass',
+        'Dry_Bushes',
+        'Ground_Clutter',
+        'Flowers',
+        'Logs',
+        'Rocks',
+        'Landscape',
+        'Sky'
     ]
     
-    # Image size
-    IMAGE_HEIGHT = 512
-    IMAGE_WIDTH = 512
+    # Color map for visualization (RGB)
+    CLASS_COLORS = [
+        [0, 0, 0],        # Background - Black
+        [34, 139, 34],    # Trees - Forest Green
+        [0, 255, 0],      # Lush_Bushes - Lime
+        [255, 215, 0],    # Dry_Grass - Gold
+        [210, 180, 140],  # Dry_Bushes - Tan
+        [165, 42, 42],    # Ground_Clutter - Brown
+        [255, 20, 147],   # Flowers - Deep Pink
+        [139, 69, 19],    # Logs - Saddle Brown
+        [128, 128, 128],  # Rocks - Gray
+        [244, 164, 96],   # Landscape - Sandy Brown
+        [135, 206, 235]   # Sky - Sky Blue
+    ]
     
-    # Training hyperparameters
-    BATCH_SIZE = 8  # Adjust based on GPU memory
-    NUM_EPOCHS = 150
-    LEARNING_RATE = 1e-4
+    # ==================== TRAINING ====================
+    BATCH_SIZE = 8
+    NUM_EPOCHS = 100
+    LEARNING_RATE = 0.1  # As requested
     WEIGHT_DECAY = 1e-4
     
-    # Loss weights
-    CE_WEIGHT = 0.5
-    DICE_WEIGHT = 0.5
-    
-    # Optimizer
-    OPTIMIZER = "adamw"  # Options: "adam", "adamw"
-    
-    # Learning rate scheduler
-    SCHEDULER = "cosine"  # Options: "cosine", "plateau"
-    LR_MIN = 1e-6  # For cosine annealing
-    PATIENCE = 10  # For ReduceLROnPlateau
-    FACTOR = 0.5  # For ReduceLROnPlateau
-    
-    # Early stopping
-    EARLY_STOPPING_PATIENCE = 25
+    # Image settings
+    IMAGE_SIZE = (512, 512)  # (height, width)
     
     # Mixed precision training
     USE_AMP = True
     
-    # Data augmentation strength
+    # ==================== AUGMENTATION ====================
     # Strong augmentation for better generalization
-    AUG_PROB = 0.8
+    AUG_PROB = 0.5
     ROTATION_LIMIT = 15
     BRIGHTNESS_LIMIT = 0.2
     CONTRAST_LIMIT = 0.2
     SATURATION_LIMIT = 0.2
     HUE_LIMIT = 0.1
-    SCALE_LIMIT = 0.2
-    NOISE_VARIANCE = 0.01
+    SCALE_LIMIT = 0.15
+    GAUSSIAN_NOISE_VAR = (10.0, 50.0)
     
-    # Test-time augmentation
-    USE_TTA = True
+    # ==================== OPTIMIZER & SCHEDULER ====================
+    OPTIMIZER = 'adamw'  # Options: 'adam', 'adamw', 'sgd'
     
-    # Hardware
-    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    NUM_WORKERS = 4
+    # Scheduler settings
+    SCHEDULER = 'cosine'  # Options: 'cosine', 'reducelr'
+    T_MAX = NUM_EPOCHS  # For CosineAnnealing
+    ETA_MIN = 1e-6  # Minimum learning rate
+    
+    # ReduceLROnPlateau settings
+    LR_PATIENCE = 5
+    LR_FACTOR = 0.5
+    
+    # ==================== EARLY STOPPING ====================
+    EARLY_STOPPING_PATIENCE = 15
+    MIN_DELTA = 1e-4
+    
+    # ==================== LOSS FUNCTION ====================
+    # Hybrid loss: 0.5 * CrossEntropy + 0.5 * Dice Loss
+    CE_WEIGHT = 0.5
+    DICE_WEIGHT = 0.5
+    USE_CLASS_WEIGHTS = True  # Computed from training set
+    DICE_SMOOTH = 1.0
+    
+    # ==================== TEST-TIME AUGMENTATION ====================
+    USE_TTA = True  # Horizontal flip averaging
+    
+    # ==================== MISC ====================
+    NUM_WORKERS = 2  # DataLoader workers
     PIN_MEMORY = True
-    
-    # Random seed for reproducibility
+    DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
     SEED = 42
-    
-    # Validation frequency
-    VAL_EVERY_N_EPOCHS = 1
     
     # Logging
     LOG_INTERVAL = 10  # Log every N batches
+    SAVE_PREDICTIONS = True
     
-    @classmethod
-    def create_dirs(cls):
+    @staticmethod
+    def create_dirs():
         """Create necessary directories"""
-        cls.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        cls.CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
-        cls.LOG_DIR.mkdir(parents=True, exist_ok=True)
-        cls.PREDICTIONS_DIR.mkdir(parents=True, exist_ok=True)
+        os.makedirs(Config.CHECKPOINT_DIR, exist_ok=True)
+        os.makedirs(Config.RUNS_DIR, exist_ok=True)
+        os.makedirs(Config.PREDICTIONS_DIR, exist_ok=True)
+    
+    @staticmethod
+    def print_config():
+        """Print configuration"""
+        print("=" * 60)
+        print("CONFIGURATION")
+        print("=" * 60)
+        print(f"Model: {Config.MODEL_NAME}")
+        print(f"Device: {Config.DEVICE}")
+        print(f"Image Size: {Config.IMAGE_SIZE}")
+        print(f"Batch Size: {Config.BATCH_SIZE}")
+        print(f"Learning Rate: {Config.LEARNING_RATE}")
+        print(f"Epochs: {Config.NUM_EPOCHS}")
+        print(f"Classes: {Config.NUM_CLASSES}")
+        print(f"Use AMP: {Config.USE_AMP}")
+        print(f"Use TTA: {Config.USE_TTA}")
+        print("=" * 60)
