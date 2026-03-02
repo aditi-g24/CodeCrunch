@@ -1,321 +1,302 @@
 """
-Comprehensive metrics for semantic segmentation evaluation
-Includes per-class IoU, mean IoU, confusion matrix, precision, and recall
+Metrics module for Offroad Semantic Segmentation
+Implements IoU, Precision, Recall, and Confusion Matrix
 """
 
 import torch
 import numpy as np
-from typing import Tuple, Dict, List
-from sklearn.metrics import confusion_matrix as sk_confusion_matrix
-import matplotlib.pyplot as plt
-import seaborn as sns
-from pathlib import Path
+from sklearn.metrics import confusion_matrix as sklearn_confusion_matrix
+from config import Config
 
 
 class SegmentationMetrics:
     """
-    Comprehensive metrics for semantic segmentation
+    Comprehensive metrics for semantic segmentation evaluation
+    Computes per-class and mean IoU, Precision, Recall, and Confusion Matrix
     """
     
-    def __init__(self, num_classes: int, class_names: List[str], device: str = 'cpu'):
+    def __init__(self, num_classes, class_names=None):
+        """
+        Args:
+            num_classes: Number of classes
+            class_names: List of class names for display
+        """
         self.num_classes = num_classes
-        self.class_names = class_names
-        self.device = device
+        self.class_names = class_names if class_names else [f"Class_{i}" for i in range(num_classes)]
         self.reset()
     
     def reset(self):
         """Reset all metrics"""
-        self.confusion_matrix = torch.zeros(
-            (self.num_classes, self.num_classes),
-            dtype=torch.int64,
-            device=self.device
-        )
+        self.confusion_matrix = np.zeros((self.num_classes, self.num_classes), dtype=np.int64)
+        self.total_samples = 0
     
-    def update(self, predictions: torch.Tensor, targets: torch.Tensor):
+    def update(self, predictions, targets):
         """
-        Update confusion matrix with new predictions
+        Update metrics with a batch of predictions and targets
         
         Args:
-            predictions: (B, C, H, W) logits or (B, H, W) class indices
-            targets: (B, H, W) class indices
+            predictions: (B, H, W) predicted class indices
+            targets: (B, H, W) ground truth class indices
         """
-        # Convert predictions to class indices if needed
-        if predictions.dim() == 4:  # (B, C, H, W) logits
-            predictions = torch.argmax(predictions, dim=1)  # (B, H, W)
+        # Convert to numpy
+        if torch.is_tensor(predictions):
+            predictions = predictions.cpu().numpy()
+        if torch.is_tensor(targets):
+            targets = targets.cpu().numpy()
         
-        # Flatten
+        # Flatten arrays
         predictions = predictions.flatten()
         targets = targets.flatten()
         
-        # Filter out ignore index if present
-        valid_mask = (targets >= 0) & (targets < self.num_classes)
-        predictions = predictions[valid_mask]
-        targets = targets[valid_mask]
-        
         # Update confusion matrix
-        for t, p in zip(targets, predictions):
-            self.confusion_matrix[t.long(), p.long()] += 1
+        # Filter out invalid labels (if any)
+        mask = (targets >= 0) & (targets < self.num_classes)
+        predictions = predictions[mask]
+        targets = targets[mask]
+        
+        # Compute confusion matrix for this batch
+        cm = sklearn_confusion_matrix(
+            targets,
+            predictions,
+            labels=np.arange(self.num_classes)
+        )
+        
+        self.confusion_matrix += cm
+        self.total_samples += len(targets)
     
-    def compute_iou(self) -> Tuple[torch.Tensor, float]:
+    def get_confusion_matrix(self):
+        """Get the confusion matrix"""
+        return self.confusion_matrix
+    
+    def get_iou_per_class(self):
         """
-        Compute per-class IoU and mean IoU
+        Compute IoU for each class
         
         Returns:
-            per_class_iou: (num_classes,) tensor
-            mean_iou: float
+            numpy array of per-class IoU
         """
-        # True Positives (diagonal elements)
-        tp = torch.diag(self.confusion_matrix)
-        
-        # False Positives (column sum - TP)
-        fp = self.confusion_matrix.sum(dim=0) - tp
-        
-        # False Negatives (row sum - TP)
-        fn = self.confusion_matrix.sum(dim=1) - tp
-        
         # IoU = TP / (TP + FP + FN)
-        iou = tp / (tp + fp + fn + 1e-6)
+        # TP: diagonal of confusion matrix
+        # FP: sum of column - TP
+        # FN: sum of row - TP
         
-        # Mean IoU (excluding classes with no ground truth)
-        valid_classes = (tp + fn) > 0
-        mean_iou = iou[valid_classes].mean().item()
+        tp = np.diag(self.confusion_matrix)
+        fp = self.confusion_matrix.sum(axis=0) - tp
+        fn = self.confusion_matrix.sum(axis=1) - tp
         
-        return iou, mean_iou
+        # Avoid division by zero
+        denominator = tp + fp + fn
+        iou = np.zeros(self.num_classes)
+        
+        valid = denominator > 0
+        iou[valid] = tp[valid] / denominator[valid]
+        
+        return iou
     
-    def compute_precision_recall(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_mean_iou(self):
         """
-        Compute per-class precision and recall
-        
-        Returns:
-            precision: (num_classes,) tensor
-            recall: (num_classes,) tensor
+        Compute mean IoU across all classes
+        Only includes classes that appear in the ground truth
         """
-        # True Positives
-        tp = torch.diag(self.confusion_matrix)
+        iou_per_class = self.get_iou_per_class()
         
-        # False Positives
-        fp = self.confusion_matrix.sum(dim=0) - tp
+        # Only average over classes that appear in ground truth
+        class_appears = self.confusion_matrix.sum(axis=1) > 0
         
-        # False Negatives
-        fn = self.confusion_matrix.sum(dim=1) - tp
+        if class_appears.sum() > 0:
+            mean_iou = iou_per_class[class_appears].mean()
+        else:
+            mean_iou = 0.0
         
-        # Precision = TP / (TP + FP)
-        precision = tp / (tp + fp + 1e-6)
-        
-        # Recall = TP / (TP + FN)
-        recall = tp / (tp + fn + 1e-6)
-        
-        return precision, recall
+        return mean_iou
     
-    def compute_pixel_accuracy(self) -> float:
+    def get_precision_per_class(self):
+        """
+        Compute Precision for each class
+        Precision = TP / (TP + FP)
+        """
+        tp = np.diag(self.confusion_matrix)
+        fp = self.confusion_matrix.sum(axis=0) - tp
+        
+        denominator = tp + fp
+        precision = np.zeros(self.num_classes)
+        
+        valid = denominator > 0
+        precision[valid] = tp[valid] / denominator[valid]
+        
+        return precision
+    
+    def get_recall_per_class(self):
+        """
+        Compute Recall for each class
+        Recall = TP / (TP + FN)
+        """
+        tp = np.diag(self.confusion_matrix)
+        fn = self.confusion_matrix.sum(axis=1) - tp
+        
+        denominator = tp + fn
+        recall = np.zeros(self.num_classes)
+        
+        valid = denominator > 0
+        recall[valid] = tp[valid] / denominator[valid]
+        
+        return recall
+    
+    def get_f1_per_class(self):
+        """
+        Compute F1 score for each class
+        F1 = 2 * (Precision * Recall) / (Precision + Recall)
+        """
+        precision = self.get_precision_per_class()
+        recall = self.get_recall_per_class()
+        
+        f1 = np.zeros(self.num_classes)
+        denominator = precision + recall
+        
+        valid = denominator > 0
+        f1[valid] = 2 * (precision[valid] * recall[valid]) / denominator[valid]
+        
+        return f1
+    
+    def get_pixel_accuracy(self):
         """
         Compute overall pixel accuracy
-        
-        Returns:
-            accuracy: float
+        Accuracy = (TP for all classes) / Total pixels
         """
-        correct = torch.diag(self.confusion_matrix).sum()
+        correct = np.diag(self.confusion_matrix).sum()
         total = self.confusion_matrix.sum()
-        accuracy = (correct / (total + 1e-6)).item()
-        return accuracy
-    
-    def get_metrics(self) -> Dict[str, float]:
-        """
-        Get all metrics as a dictionary
         
-        Returns:
-            metrics: Dictionary of metric names and values
-        """
-        iou, mean_iou = self.compute_iou()
-        precision, recall = self.compute_precision_recall()
-        pixel_acc = self.compute_pixel_accuracy()
-        
-        metrics = {
-            'mean_iou': mean_iou,
-            'pixel_accuracy': pixel_acc,
-        }
-        
-        # Add per-class metrics
-        for i, name in enumerate(self.class_names):
-            if i < len(iou):
-                metrics[f'iou_{name}'] = iou[i].item()
-                metrics[f'precision_{name}'] = precision[i].item()
-                metrics[f'recall_{name}'] = recall[i].item()
-        
-        return metrics
+        if total > 0:
+            return correct / total
+        else:
+            return 0.0
     
     def print_metrics(self):
-        """Print metrics in a formatted way"""
-        iou, mean_iou = self.compute_iou()
-        precision, recall = self.compute_precision_recall()
-        pixel_acc = self.compute_pixel_accuracy()
+        """Print comprehensive metrics report"""
+        iou_per_class = self.get_iou_per_class()
+        precision_per_class = self.get_precision_per_class()
+        recall_per_class = self.get_recall_per_class()
+        f1_per_class = self.get_f1_per_class()
+        mean_iou = self.get_mean_iou()
+        pixel_acc = self.get_pixel_accuracy()
         
-        print("\n" + "="*80)
-        print(f"{'SEGMENTATION METRICS':^80}")
-        print("="*80)
-        print(f"Mean IoU: {mean_iou:.4f}")
-        print(f"Pixel Accuracy: {pixel_acc:.4f}")
-        print("\nPer-class metrics:")
-        print(f"{'Class':<20} {'IoU':>10} {'Precision':>12} {'Recall':>10}")
-        print("-"*80)
+        print("\n" + "=" * 80)
+        print("SEGMENTATION METRICS")
+        print("=" * 80)
         
-        for i, name in enumerate(self.class_names):
-            if i < len(iou):
-                print(f"{name:<20} {iou[i].item():>10.4f} {precision[i].item():>12.4f} {recall[i].item():>10.4f}")
+        print(f"\nOverall Metrics:")
+        print(f"  Mean IoU:         {mean_iou:.4f}")
+        print(f"  Pixel Accuracy:   {pixel_acc:.4f}")
         
-        print("="*80 + "\n")
+        print(f"\nPer-Class Metrics:")
+        print("-" * 80)
+        print(f"{'Class':<20} {'IoU':>10} {'Precision':>12} {'Recall':>10} {'F1':>10}")
+        print("-" * 80)
+        
+        for i in range(self.num_classes):
+            class_name = self.class_names[i] if i < len(self.class_names) else f"Class {i}"
+            # Only print if class appears in ground truth
+            if self.confusion_matrix[i].sum() > 0:
+                print(f"{class_name:<20} {iou_per_class[i]:>10.4f} {precision_per_class[i]:>12.4f} "
+                      f"{recall_per_class[i]:>10.4f} {f1_per_class[i]:>10.4f}")
+        
+        print("-" * 80)
+        print()
     
-    def plot_confusion_matrix(self, save_path: Path):
+    def get_metrics_dict(self):
         """
-        Plot and save confusion matrix
-        
-        Args:
-            save_path: Path to save the plot
+        Return metrics as a dictionary
+        Useful for logging and tracking
         """
-        cm = self.confusion_matrix.cpu().numpy()
+        iou_per_class = self.get_iou_per_class()
+        precision_per_class = self.get_precision_per_class()
+        recall_per_class = self.get_recall_per_class()
         
-        # Normalize by row (true labels)
-        cm_normalized = cm.astype('float') / (cm.sum(axis=1, keepdims=True) + 1e-6)
+        metrics = {
+            'mean_iou': self.get_mean_iou(),
+            'pixel_accuracy': self.get_pixel_accuracy(),
+            'iou_per_class': iou_per_class,
+            'precision_per_class': precision_per_class,
+            'recall_per_class': recall_per_class
+        }
         
-        plt.figure(figsize=(12, 10))
-        sns.heatmap(
-            cm_normalized,
-            annot=False,
-            fmt='.2f',
-            cmap='Blues',
-            xticklabels=self.class_names,
-            yticklabels=self.class_names,
-            cbar_kws={'label': 'Normalized Frequency'}
-        )
-        plt.title('Confusion Matrix (Normalized)', fontsize=14, fontweight='bold')
-        plt.ylabel('True Label', fontsize=12)
-        plt.xlabel('Predicted Label', fontsize=12)
-        plt.tight_layout()
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        plt.close()
+        # Add per-class metrics with names
+        for i, class_name in enumerate(self.class_names):
+            metrics[f'iou_{class_name}'] = iou_per_class[i]
+            metrics[f'precision_{class_name}'] = precision_per_class[i]
+            metrics[f'recall_{class_name}'] = recall_per_class[i]
         
-        print(f"Confusion matrix saved to {save_path}")
+        return metrics
 
 
-def compute_iou_batch(
-    predictions: torch.Tensor,
-    targets: torch.Tensor,
-    num_classes: int
-) -> Tuple[torch.Tensor, float]:
+def compute_iou_batch(predictions, targets, num_classes):
     """
-    Compute IoU for a single batch (quick computation)
+    Fast computation of IoU for a single batch
     
     Args:
-        predictions: (B, C, H, W) logits or (B, H, W) class indices
-        targets: (B, H, W) class indices
+        predictions: (B, H, W) predicted class indices
+        targets: (B, H, W) ground truth class indices
         num_classes: Number of classes
     
     Returns:
-        per_class_iou: (num_classes,) tensor
-        mean_iou: float
+        Mean IoU for the batch
     """
-    # Convert predictions to class indices if needed
-    if predictions.dim() == 4:
-        predictions = torch.argmax(predictions, dim=1)
+    batch_size = predictions.shape[0]
+    ious = []
     
-    iou_list = []
-    
-    for cls in range(num_classes):
-        pred_mask = (predictions == cls)
-        target_mask = (targets == cls)
+    for b in range(batch_size):
+        pred = predictions[b].flatten()
+        target = targets[b].flatten()
         
-        intersection = (pred_mask & target_mask).sum().float()
-        union = (pred_mask | target_mask).sum().float()
+        iou_per_class = []
+        for c in range(num_classes):
+            pred_c = (pred == c)
+            target_c = (target == c)
+            
+            intersection = (pred_c & target_c).sum().item()
+            union = (pred_c | target_c).sum().item()
+            
+            if union > 0:
+                iou_per_class.append(intersection / union)
         
-        if union == 0:
-            iou_list.append(torch.tensor(0.0, device=predictions.device))
-        else:
-            iou_list.append(intersection / union)
+        if len(iou_per_class) > 0:
+            ious.append(np.mean(iou_per_class))
     
-    iou_tensor = torch.stack(iou_list)
-    mean_iou = iou_tensor.mean().item()
-    
-    return iou_tensor, mean_iou
+    return np.mean(ious) if len(ious) > 0 else 0.0
 
 
-class MetricTracker:
+def save_confusion_matrix(confusion_matrix, class_names, save_path):
     """
-    Track metrics over training epochs
+    Save confusion matrix as image
+    
+    Args:
+        confusion_matrix: Confusion matrix array
+        class_names: List of class names
+        save_path: Path to save the image
     """
+    import matplotlib.pyplot as plt
+    import seaborn as sns
     
-    def __init__(self):
-        self.history = {
-            'train_loss': [],
-            'val_loss': [],
-            'val_mean_iou': [],
-            'val_pixel_acc': [],
-            'learning_rate': []
-        }
-        self.best_mean_iou = 0.0
-        self.best_epoch = 0
+    plt.figure(figsize=(12, 10))
     
-    def update(self, epoch: int, metrics: Dict[str, float]):
-        """Update history with new metrics"""
-        for key, value in metrics.items():
-            if key not in self.history:
-                self.history[key] = []
-            self.history[key].append(value)
-        
-        # Track best model
-        if 'val_mean_iou' in metrics:
-            if metrics['val_mean_iou'] > self.best_mean_iou:
-                self.best_mean_iou = metrics['val_mean_iou']
-                self.best_epoch = epoch
+    # Normalize confusion matrix
+    cm_normalized = confusion_matrix.astype('float') / (confusion_matrix.sum(axis=1, keepdims=True) + 1e-10)
     
-    def plot_history(self, save_path: Path):
-        """Plot training history"""
-        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-        
-        # Loss
-        if 'train_loss' in self.history and 'val_loss' in self.history:
-            axes[0, 0].plot(self.history['train_loss'], label='Train Loss', linewidth=2)
-            axes[0, 0].plot(self.history['val_loss'], label='Val Loss', linewidth=2)
-            axes[0, 0].set_xlabel('Epoch')
-            axes[0, 0].set_ylabel('Loss')
-            axes[0, 0].set_title('Training and Validation Loss')
-            axes[0, 0].legend()
-            axes[0, 0].grid(True, alpha=0.3)
-        
-        # Mean IoU
-        if 'val_mean_iou' in self.history:
-            axes[0, 1].plot(self.history['val_mean_iou'], label='Val Mean IoU', 
-                           color='green', linewidth=2)
-            axes[0, 1].axhline(y=self.best_mean_iou, color='r', linestyle='--', 
-                              label=f'Best: {self.best_mean_iou:.4f}')
-            axes[0, 1].set_xlabel('Epoch')
-            axes[0, 1].set_ylabel('Mean IoU')
-            axes[0, 1].set_title('Validation Mean IoU')
-            axes[0, 1].legend()
-            axes[0, 1].grid(True, alpha=0.3)
-        
-        # Pixel Accuracy
-        if 'val_pixel_acc' in self.history:
-            axes[1, 0].plot(self.history['val_pixel_acc'], label='Val Pixel Acc', 
-                           color='purple', linewidth=2)
-            axes[1, 0].set_xlabel('Epoch')
-            axes[1, 0].set_ylabel('Pixel Accuracy')
-            axes[1, 0].set_title('Validation Pixel Accuracy')
-            axes[1, 0].legend()
-            axes[1, 0].grid(True, alpha=0.3)
-        
-        # Learning Rate
-        if 'learning_rate' in self.history:
-            axes[1, 1].plot(self.history['learning_rate'], label='Learning Rate', 
-                           color='orange', linewidth=2)
-            axes[1, 1].set_xlabel('Epoch')
-            axes[1, 1].set_ylabel('Learning Rate')
-            axes[1, 1].set_title('Learning Rate Schedule')
-            axes[1, 1].legend()
-            axes[1, 1].grid(True, alpha=0.3)
-            axes[1, 1].set_yscale('log')
-        
-        plt.tight_layout()
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        plt.close()
-        
-        print(f"Training history saved to {save_path}")
+    sns.heatmap(
+        cm_normalized,
+        annot=False,
+        fmt='.2f',
+        cmap='Blues',
+        xticklabels=class_names,
+        yticklabels=class_names,
+        cbar_kws={'label': 'Normalized Count'}
+    )
+    
+    plt.xlabel('Predicted')
+    plt.ylabel('True')
+    plt.title('Confusion Matrix (Normalized)')
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    
+    print(f"Confusion matrix saved to {save_path}")
