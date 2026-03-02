@@ -1,53 +1,74 @@
 # Offroad Semantic Segmentation - Competition Solution
 
-**High-performance semantic segmentation for Duality AI's Offroad Hackathon**
-
-Optimized for maximum IoU and strong generalization to unseen desert environments.
+High-performance semantic segmentation solution for Duality AI's Offroad Scene Segmentation Hackathon. Optimized for maximum IoU and strong generalization to unseen desert environments.
 
 ## 🎯 Features
 
 ### Architecture
-- **SegFormer** (default) - Transformer-based encoder with superior generalization
-  - Hierarchical MiT (Mix Transformer) backbone
-  - Better global context understanding
-  - More robust to domain shift than pure CNNs
-- **DeepLabV3+** (alternative) - Strong CNN baseline with ASPP
+- **SegFormer** (default): Superior global context modeling for domain shift robustness
+- **DeepLabV3+**: Alternative with ResNet50/101 backbone and ASPP module
+- Pretrained ImageNet weights for transfer learning
 
-### Training Strategy
-- **Hybrid Loss**: 0.5 × CrossEntropy + 0.5 × Dice Loss
-- **Class Weights**: Automatically computed from pixel frequency
-- **Mixed Precision**: FP16 training for faster convergence
-- **Strong Augmentation**: Optimized for desert domain generalization
-  - Random rotation, scaling, flipping
-  - Color jitter, gamma, tone curves
-  - Gaussian noise and blur
-  - Random shadows
+### Loss Function
+- **Hybrid Loss**: `0.5 × CrossEntropy + 0.5 × Dice Loss`
+- Automatic class weight computation from training data
+- Direct IoU optimization via Dice Loss
+
+### Training Optimizations
+- **Mixed Precision (FP16)**: Faster training with reduced memory
+- **Strong Augmentation Pipeline**:
+  - Random horizontal flip
+  - Random rotation (±15°)
+  - Color jitter (brightness, contrast, saturation, hue)
+  - Random scaling
+  - Gaussian noise
 - **Learning Rate Scheduling**: CosineAnnealing or ReduceLROnPlateau
 - **Early Stopping**: Prevents overfitting
+- **Model Checkpointing**: Saves best model based on validation IoU
 
-### Evaluation
+### Evaluation Metrics
 - Per-class IoU
 - Mean IoU
-- Pixel Accuracy
-- Precision & Recall per class
+- Precision and Recall per class
 - Confusion Matrix
-- Test-Time Augmentation (TTA)
+- Pixel Accuracy
+
+### Test-Time Augmentation (TTA)
+- Horizontal flip averaging for improved predictions
 
 ## 📁 Project Structure
 
 ```
 offroad_segmentation/
-├── config.py           # All hyperparameters and settings
-├── dataset.py          # Data loading and augmentation
-├── loss.py            # Hybrid loss function
-├── metrics.py         # Comprehensive evaluation metrics
-├── model.py           # Model architectures
-├── train.py           # Training script
-├── test.py            # Inference script
-├── requirements.txt   # Dependencies
-└── README.md          # This file
+├── config.py          # Configuration and hyperparameters
+├── dataset.py         # Data loading and augmentation
+├── model.py          # Model architectures
+├── loss.py           # Hybrid loss implementation
+├── metrics.py        # Evaluation metrics
+├── train.py          # Training script
+├── test.py           # Inference script
+├── requirements.txt  # Dependencies
+└── README.md         # This file
+```
 
-data/                  # Your data directory
+## 🚀 Quick Start for Google Colab
+
+### 1. Setup
+
+```python
+# Clone or upload the code to Colab
+!git clone <your-repo-url>
+# OR upload files directly
+
+# Install dependencies
+!pip install segmentation-models-pytorch albumentations --break-system-packages
+```
+
+### 2. Upload Dataset
+
+Upload your dataset to Colab with this structure:
+```
+/content/
 ├── Train/
 │   ├── images/
 │   └── masks/
@@ -55,196 +76,219 @@ data/                  # Your data directory
 │   ├── images/
 │   └── masks/
 └── testImages/
-
-runs/                  # Generated outputs
-├── checkpoints/       # Model checkpoints
-├── logs/             # Training logs and plots
-└── predictions/      # Test predictions
 ```
 
-## 🚀 Quick Start
+### 3. Configure Paths
 
-### 1. Setup Environment
-
-```bash
-# Create conda environment
-conda create -n offroad python=3.9
-conda activate offroad
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-### 2. Prepare Data
-
-Update paths in `config.py`:
+The config.py is already set up for Colab paths:
 ```python
-DATA_ROOT = Path("./data")  # Point to your data directory
-```
-
-Expected structure:
-```
-data/
-├── Train/
-│   ├── images/  # Training images
-│   └── masks/   # Training masks
-├── Val/
-│   ├── images/  # Validation images
-│   └── masks/   # Validation masks
-└── testImages/  # Test images (NO masks)
-```
-
-### 3. Configure Model
-
-Edit `config.py` to select architecture:
-
-```python
-# For SegFormer (recommended)
-MODEL_NAME = "segformer"
-ENCODER_NAME = "mit_b3"  # Options: mit_b0, mit_b1, mit_b2, mit_b3, mit_b4, mit_b5
-
-# For DeepLabV3+
-MODEL_NAME = "deeplabv3plus"
-ENCODER_NAME = "resnet101"  # Options: resnet50, resnet101
+TRAIN_IMG_DIR = '/content/Train/images'
+TRAIN_MASK_DIR = '/content/Train/masks'
+VAL_IMG_DIR = '/content/Val/images'
+VAL_MASK_DIR = '/content/Val/masks'
+TEST_IMG_DIR = '/content/testImages'
 ```
 
 ### 4. Train
 
-```bash
-python train.py
+```python
+!python train.py
 ```
 
-**Training outputs:**
-- `runs/checkpoints/best_model.pth` - Best model based on validation IoU
-- `runs/logs/training_history.png` - Training curves
-- `runs/logs/confusion_matrix_best.png` - Confusion matrix
-- `runs/logs/training_history.json` - Metrics history
+Training will:
+- Automatically compute class weights
+- Save best model to `/content/checkpoints/best.pth`
+- Log training history to `/content/runs/`
+- Display progress bars with loss and IoU
 
 ### 5. Test/Inference
 
-```bash
-# Run inference on test set
-python test.py
-
-# Evaluate on validation set
-python test.py --eval
+```python
+!python test.py
 ```
 
-**Test outputs:**
-- `runs/predictions/pred_*.png` - Predicted segmentation masks
-- `runs/predictions/vis_*.png` - Visualizations (original + prediction overlay)
-- `runs/predictions/color_legend.png` - Class color mapping
+This will:
+- Load the best model
+- Run predictions with TTA on test images
+- Save masks to `/content/predictions/`
+- Create visualizations
+- Compute metrics if ground truth available
 
 ## ⚙️ Configuration
 
-Key hyperparameters in `config.py`:
+Edit `config.py` to customize:
 
+### Model Selection
 ```python
-# Model
-MODEL_NAME = "segformer"  # or "deeplabv3plus"
-NUM_CLASSES = 11
+MODEL_NAME = 'segformer'  # or 'deeplabv3plus'
+SEGFORMER_ENCODER = 'mit_b3'  # mit_b0 to mit_b5
+DEEPLABV3_BACKBONE = 'resnet101'  # resnet50 or resnet101
+```
 
-# Training
+### Hyperparameters
+```python
 BATCH_SIZE = 8
-NUM_EPOCHS = 150
-LEARNING_RATE = 1e-4
-WEIGHT_DECAY = 1e-4
+NUM_EPOCHS = 100
+LEARNING_RATE = 0.1  # As required
+IMAGE_SIZE = (512, 512)
+USE_AMP = True  # Mixed precision
+USE_TTA = True  # Test-time augmentation
+```
 
-# Loss
-CE_WEIGHT = 0.5
-DICE_WEIGHT = 0.5
-
-# Augmentation
-AUG_PROB = 0.8
+### Augmentation Strength
+```python
 ROTATION_LIMIT = 15
 BRIGHTNESS_LIMIT = 0.2
 CONTRAST_LIMIT = 0.2
-
-# Optimization
-SCHEDULER = "cosine"  # or "plateau"
-EARLY_STOPPING_PATIENCE = 25
-
-# Test-Time Augmentation
-USE_TTA = True
+SCALE_LIMIT = 0.15
 ```
 
-## 🎓 Training Tips
-
-### For Better Generalization
-1. **Strong augmentation is critical** - Desert scenes vary in lighting, color
-2. **Don't overtrain** - Use early stopping, monitor validation IoU
-3. **Class weights help** - Desert classes are often imbalanced
-4. **TTA improves results** - Especially horizontal flip for symmetry
-
-### For Faster Training
-1. Reduce `BATCH_SIZE` if GPU memory limited
-2. Use smaller encoder: `mit_b0` or `mit_b1`
-3. Reduce `IMAGE_HEIGHT` and `IMAGE_WIDTH`
-4. Disable `USE_AMP` if causing issues
-
-### For Higher Accuracy
-1. Use larger encoder: `mit_b4` or `mit_b5`
-2. Increase training epochs
-3. Enable TTA during validation
-4. Fine-tune augmentation parameters
-
-## 📊 Expected Performance
-
-**On similar desert segmentation tasks:**
-- Mean IoU: 0.70 - 0.85 (depending on domain shift)
-- Pixel Accuracy: 0.85 - 0.95
-- Training time: 2-4 hours on RTX 3090 (150 epochs)
-
-## 🔧 Troubleshooting
-
-**Out of Memory:**
+### Loss Weights
 ```python
-# In config.py
-BATCH_SIZE = 4  # Reduce batch size
-IMAGE_HEIGHT = 384  # Reduce image size
-IMAGE_WIDTH = 384
+CE_WEIGHT = 0.5
+DICE_WEIGHT = 0.5
+USE_CLASS_WEIGHTS = True
 ```
 
-**Poor validation performance:**
-- Check class distribution - may need stronger weights
+## 📊 Understanding the Output
+
+### Training Output
+```
+Epoch 1/100 [Train]: 100%|██████| loss: 0.8234 | ce: 0.4567 | dice: 0.3667
+Epoch 1/100 [Val]:   100%|██████|
+Train Loss: 0.8234 | Train IoU: 0.4523
+Val Loss:   0.7891 | Val IoU:   0.4856
+✓ Saved best model with IoU: 0.4856
+```
+
+### Checkpoints
+- `best.pth`: Model with highest validation IoU
+- `latest.pth`: Most recent model (for resuming training)
+
+### Predictions
+- `/content/predictions/`: Grayscale masks (class indices)
+- `/content/predictions/colored/`: RGB visualization
+- `/content/predictions/visualizations/`: Side-by-side comparisons
+
+### Metrics Report
+```
+==============================================================================
+SEGMENTATION METRICS
+==============================================================================
+
+Overall Metrics:
+  Mean IoU:         0.7234
+  Pixel Accuracy:   0.8567
+
+Per-Class Metrics:
+--------------------------------------------------------------------------------
+Class                      IoU   Precision     Recall         F1
+--------------------------------------------------------------------------------
+Trees                   0.7845      0.8234     0.7456     0.7823
+Lush_Bushes             0.6923      0.7345     0.6512     0.6901
+...
+```
+
+## 🔧 Advanced Usage
+
+### Resume Training
+```python
+# Modify train.py to load checkpoint:
+checkpoint = torch.load('checkpoints/latest.pth')
+model.load_state_dict(checkpoint['model_state_dict'])
+optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+```
+
+### Custom Dataset Structure
+If your dataset has different structure, modify in `config.py`:
+```python
+TRAIN_IMG_DIR = '/path/to/train/images'
+TRAIN_MASK_DIR = '/path/to/train/masks'
+```
+
+### Experiment with Different Models
+```python
+# Try SegFormer variants
+SEGFORMER_ENCODER = 'mit_b5'  # Larger model
+
+# Or switch to DeepLabV3+
+MODEL_NAME = 'deeplabv3plus'
+DEEPLABV3_BACKBONE = 'resnet101'
+```
+
+### Adjust for Memory Constraints
+```python
+BATCH_SIZE = 4  # Reduce if OOM
+IMAGE_SIZE = (384, 384)  # Smaller images
+USE_AMP = True  # Keep enabled for memory savings
+```
+
+## 🎓 Domain Shift Strategy
+
+This solution is optimized for domain shift (train on one desert, test on another):
+
+1. **Strong Augmentation**: Color jitter and noise help model learn invariant features
+2. **SegFormer Architecture**: Global attention mechanisms generalize better than pure CNNs
+3. **Dice Loss**: Directly optimizes for IoU metric
+4. **Class Weighting**: Handles imbalanced classes in desert scenes
+5. **Early Stopping**: Prevents overfitting to source domain
+6. **TTA**: Averages predictions for robustness
+
+## 📈 Expected Performance
+
+With proper training (50-100 epochs):
+- **Validation IoU**: 0.65 - 0.75
+- **Test IoU**: 0.60 - 0.70 (domain shift)
+
+Performance varies based on:
+- Domain similarity between train/test
+- Class balance in dataset
+- Model capacity (mit_b3 vs mit_b5)
+- Training duration
+
+## 🐛 Troubleshooting
+
+### CUDA Out of Memory
+```python
+BATCH_SIZE = 4
+IMAGE_SIZE = (384, 384)
+```
+
+### segmentation_models_pytorch not found
+```bash
+!pip install segmentation-models-pytorch --break-system-packages
+```
+
+### Poor generalization
 - Increase augmentation strength
-- Reduce learning rate
-- Try different encoder
+- Train longer but watch for early stopping
+- Try mit_b5 encoder for more capacity
+- Reduce learning rate to 0.01 or 0.001
 
-**Model not loading:**
-- Check `NUM_CLASSES` matches your data
-- Verify checkpoint path exists
-- Ensure model architecture matches checkpoint
+### Class imbalance
+- Ensure `USE_CLASS_WEIGHTS = True`
+- Check class distribution printed during training
+- Consider Focal Loss (implemented in loss.py)
 
-## 📝 Submission
+## 📝 Citation
 
-For competition submission:
-1. Run inference: `python test.py`
-2. Submit masks from: `runs/predictions/pred_*.png`
-3. Include best model: `runs/checkpoints/best_model.pth`
-4. Document mean IoU from validation
+If you use this code, please cite:
+```
+@misc{offroad_segmentation_2024,
+  title={Competition-Grade Semantic Segmentation for Offroad Scenes},
+  author={Your Name},
+  year={2024}
+}
+```
 
-## 🏆 Why This Solution Wins
+## 📄 License
 
-1. **SegFormer Architecture**: Superior generalization over CNNs
-2. **Hybrid Loss**: Combines pixel accuracy + region overlap
-3. **Domain-Aware Augmentation**: Simulates lighting/color variations
-4. **Automatic Class Balancing**: Handles imbalanced desert classes
-5. **TTA**: 1-2% IoU boost at inference time
-6. **Production Ready**: Clean, modular, reproducible code
+MIT License - feel free to use for competitions and research.
 
-## 📚 References
+## 🤝 Contributing
 
-- SegFormer: [Simple and Efficient Design for Semantic Segmentation with Transformers](https://arxiv.org/abs/2105.15203)
-- DeepLabV3+: [Encoder-Decoder with Atrous Separable Convolution](https://arxiv.org/abs/1802.02611)
-- Segmentation Models PyTorch: [GitHub](https://github.com/qubvel/segmentation_models.pytorch)
-
-## 📧 Support
-
-For issues or questions:
-1. Check configuration in `config.py`
-2. Review error messages in console
-3. Verify data structure matches expected format
-4. Check GPU memory and dependencies
-
-Good luck with the competition! 🚀
+Suggestions and improvements welcome! Key areas:
+- Additional augmentation strategies
+- New model architectures
+- Multi-scale inference
+- Ensemble methods
